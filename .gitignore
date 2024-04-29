@@ -1,1 +1,4 @@
 chirpy
+main
+.env
+database.json
