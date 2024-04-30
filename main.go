@@ -20,6 +20,34 @@ type apistate struct {
     jwtsecret string
 }
 
+type tokenConfig struct {
+    Issuer string
+    Expires int
+    Subject string
+}
+
+func (c *tokenConfig) createToken(secret string) string {
+    expiresIn := 86400
+    secretkey := []byte(secret)
+    if c.Expires > 0 && c.Expires < expiresIn {
+
+        expiresIn = c.Expires
+    }
+    now := time.Now()
+
+    claims := &jwt.RegisteredClaims {
+        IssuedAt: jwt.NewNumericDate(now.UTC()),
+        ExpiresAt: jwt.NewNumericDate(now.Add(time.Second * time.Duration(expiresIn)).UTC()),
+        Issuer: c.Issuer,
+        Subject: c.Subject,
+    }
+
+    token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+    ss, _ := token.SignedString(secretkey)
+
+    return ss
+}
+
 func (c *apistate) middlewareMetrics(next http.Handler) http.Handler {
     return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
     fmt.Println(*c)
@@ -46,29 +74,15 @@ func (c *apistate) handleMetrics(w http.ResponseWriter, r *http.Request) {
 func handleGetChirps(w http.ResponseWriter, r *http.Request) {
     w.Header().Set("Content-Type", "application/json")
 
-    type errorResp struct {
-        Error string `json:"error"`
-    }
-
     db, err := database.NewDB("database.json")
 
-    e := errorResp{}
-
-    if err != nil {
-        e.Error = "Something went wrong"
-        res, _ := json.Marshal(e)    
-        w.WriteHeader(500)
-        w.Write(res)
+    if !checkErrorRespose(err, &w) {
         return
     }
 
     chirps, err := db.GetChirps()
-
-    if err != nil {
-        e.Error = "Something went wrong"
-        res, _ := json.Marshal(e)    
-        w.WriteHeader(500)
-        w.Write(res)
+    
+    if !checkErrorRespose(err, &w) {
         return
     }
 
@@ -80,40 +94,22 @@ func handleGetChirps(w http.ResponseWriter, r *http.Request) {
 func handleGetOneChirp(w http.ResponseWriter, r *http.Request) {
     w.Header().Set("Content-Type", "application/json")
 
-    type errorResp struct {
-        Error string `json:"error"`
-    }
-
     db, err := database.NewDB("database.json")
 
-    e := errorResp{}
-
-    if err != nil {
-        e.Error = "Something went wrong"
-        res, _ := json.Marshal(e)    
-        w.WriteHeader(500)
-        w.Write(res)
+    if !checkErrorRespose(err, &w) {
         return
     }
 
     rawID := r.PathValue("chirpID")
     id, err := strconv.Atoi(rawID)
 
-    if err != nil {
-        e.Error = "Something went wrong"
-        res, _ := json.Marshal(e)    
-        w.WriteHeader(500)
-        w.Write(res)
+    if !checkErrorRespose(err, &w) {
         return
     }
 
     chirp, err := db.GetChirp(id)
 
-    if err != nil {
-        e.Error = "Chirp not found"
-        res, _ := json.Marshal(e)    
-        w.WriteHeader(404)
-        w.Write(res)
+    if !checkErrorRespose(err, &w) {
         return
     }
 
@@ -132,74 +128,53 @@ func (c *apistate) handleLogin(w http.ResponseWriter, r *http.Request) {
         Expires int `json:"expires_in_seconds"`
     }
 
-    type errorResp struct {
-        Error string `json:"error"`
-    }
-
     type response struct {
         Id int `json:"id"`
         Email string `json:"email"`
-        Token string `json:"token"`
+        AccessToken string `json:"token"`
+        RefreshToken string `json:"refresh_token"`
     }
 
     decoder := json.NewDecoder(r.Body)
     b := body{}
-    e := errorResp{}
     err := decoder.Decode(&b)
 
-    if err != nil {
-        log.Print("Error Decoding JSON")
-        e.Error = "Something went wrong"
-        res, _ := json.Marshal(e)    
-        w.WriteHeader(500)
-        w.Write(res)
+    if !checkErrorRespose(err, &w) {
         return
     }
 
     db, err := database.NewDB("database.json")
 
-    if err != nil {
-        log.Print(err)
-        e.Error = "Something went wrong"
-        res, _ := json.Marshal(e)    
-        w.WriteHeader(500)
-        w.Write(res)
+    if !checkErrorRespose(err, &w) {
         return
     }
 
     user, err := db.GetUser(b.Email, b.Password)
 
-    if err != nil {
-        log.Print(err)
-        e.Error = "Something went wrong"
-        res, _ := json.Marshal(e)    
-        w.WriteHeader(401)
-        w.Write(res)
+    if !checkErrorRespose(err, &w) {
         return
     }
 
-    expiresIn := 86400
-    secretkey := []byte(c.jwtsecret)
-    
-    if b.Expires > 0 && b.Expires < expiresIn {
-        expiresIn = b.Expires
-    }
-    
-    now := time.Now()
-    claims := &jwt.RegisteredClaims {
-        IssuedAt: jwt.NewNumericDate(now.UTC()),
-        ExpiresAt: jwt.NewNumericDate(now.Add(time.Second * time.Duration(expiresIn)).UTC()),
-        Issuer: "chirpy",
+    accessConfig := tokenConfig{
+        Expires: 3600,
+        Issuer: "chirpy-access",
         Subject: strconv.Itoa(user.ID),
     }
 
-    token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-    ss, _ := token.SignedString(secretkey)
+    refreshConfig := tokenConfig{
+        Expires: 5184000,
+        Issuer: "chirpy-refresh",
+        Subject: strconv.Itoa(user.ID),
+    }
+
+    refreshToken := refreshConfig.createToken(c.jwtsecret)
+    accessToken := accessConfig.createToken(c.jwtsecret)
 
     tokenResp := response{
         Id: user.ID,
         Email: user.Email,
-        Token: ss,
+        AccessToken: accessToken,
+        RefreshToken: refreshToken,
     }
 
     res, _ := json.Marshal(tokenResp)
