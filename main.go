@@ -68,7 +68,7 @@ func (c *apistate) middlewareMetricsReset(next http.Handler) http.Handler {
 func (c *apistate) handleMetrics(w http.ResponseWriter, r *http.Request) {
     w.Header().Set("Content-Type", "text/html; charset=utf-8")
     w.WriteHeader(200)
-    w.Write([]byte(fmt.Sprintf("<html><body><h1>Welcome, Chirpy Admin</h1><p>Chirpy has been visited %d times!</p></body></html>", c.fileserverHits)))
+    fmt.Fprintf(w, "<html><body><h1>Welcome, Chirpy Admin</h1><p>Chirpy has been visited %d times!</p></body></html>", c.fileserverHits)
 }
 
 func handleGetChirps(w http.ResponseWriter, r *http.Request) {
